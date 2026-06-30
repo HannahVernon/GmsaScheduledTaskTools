@@ -20,6 +20,7 @@ Script | Purpose
 `New-GmsaScheduledTask.ps1` | Create (or idempotently update) a Scheduled Task that runs as a gMSA.  Optionally validates the gMSA on the host and grants the "Log on as a batch job" right.
 `Get-GmsaScheduledTask.ps1` | Report the principal, action, and trigger of one or more tasks, with a focus on gMSA detail.  Read-only.
 `Remove-GmsaScheduledTask.ps1` | Unregister a task and, optionally, revoke the gMSA's "Log on as a batch job" right.
+`Test-ScheduledTaskHealth.ps1` | Diagnose a stalled/hung Task Scheduler by reconciling the on-disk task XML files against the `TaskCache` registry, without calling the Task Scheduler service.  Read-only.
 
 Every script ships with comment-based help.  Run `Get-Help .\New-GmsaScheduledTask.ps1 -Full`
 for full parameter documentation and examples.
@@ -56,6 +57,33 @@ Remove a task (leaving the batch logon right in place for other workloads):
 
 ```powershell
 .\Remove-GmsaScheduledTask.ps1 -TaskName 'NightlyExport'
+```
+
+Diagnose a Task Scheduler that hangs while enumerating tasks (the MMC, `schtasks`, and
+`Get-ScheduledTask` all stall when the service is stuck on one damaged task).  Run elevated:
+
+```powershell
+.\Test-ScheduledTaskHealth.ps1 |
+    Where-Object Severity -eq 'Error' |
+    Select-Object Category, TaskPath, TaskGuid, FilePath, SuggestedAction | Format-List
+```
+
+`Test-ScheduledTaskHealth.ps1` is read-only by default and does not call the Task Scheduler
+service, so it works even while `taskschd.msc` is unresponsive.  It flags orphaned `TaskCache`
+registry entries, missing or zero-byte or malformed task XML, and (with `-ResolvePrincipals`)
+unresolvable principal SIDs.
+
+To repair the damaged/orphaned tasks it finds, add `-Repair`.  Repair backs up each item (a
+native `.reg` export of the registry key plus a copy of the XML file, to `-BackupPath`) before
+removing it, and honors `-WhatIf` / `-Confirm`.  Always do a read-only run first, then reboot
+after a repair so the service re-reads `TaskCache`:
+
+```powershell
+# Preview what a repair would back up and remove (no changes):
+.\Test-ScheduledTaskHealth.ps1 -Repair -WhatIf
+
+# Back up and remove every damaged/orphaned task, then reboot:
+.\Test-ScheduledTaskHealth.ps1 -Repair -Confirm:$false
 ```
 
 ## Notes
