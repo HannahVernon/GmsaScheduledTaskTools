@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a problem with one of the scripts
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact command(s) you ran and what happened.
+      placeholder: |
+        1. Ran '.\Get-GmsaScheduledTask.ps1 -Recurse'
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: e.g. Windows Server 2022, Windows 11 23H2
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Script version / commit
+      description: The release tag or commit SHA you are running.
+    validations:
+      required: true
