@@ -137,6 +137,23 @@ begin
         return ($user.EndsWith('$') -and $logonType -eq 'Password')
     }
 
+    function Get-CimPropertyValue
+    {
+        <#
+            StrictMode-safe property read.  Under Set-StrictMode -Version Latest, accessing a
+            property that does not exist on an object throws a terminating error.  Scheduled
+            Task actions come in different CIM types (MSFT_TaskExecAction exposes Execute /
+            Arguments / WorkingDirectory; MSFT_TaskComHandlerAction exposes ClassId / Data), so
+            properties must be probed rather than accessed blindly.  Returns $null when absent.
+        #>
+        param ($InputObject, [string] $Name)
+
+        if ($null -eq $InputObject) { return $null }
+        $prop = $InputObject.PSObject.Properties[$Name]
+        if ($prop) { return $prop.Value }
+        return $null
+    }
+
     function Get-BareSamName
     {
         param ([string] $UserId)
@@ -345,12 +362,20 @@ process
         }
 
         # --- Actions --------------------------------------------------------------------
+        # Tasks can hold executable actions (MSFT_TaskExecAction) or COM-handler actions
+        # (MSFT_TaskComHandlerAction).  Probe properties so StrictMode does not throw on the
+        # type that lacks Execute/Arguments/WorkingDirectory.
         $actions = foreach ($a in @($task.Actions))
         {
+            $actionType = if ($a -and $a.PSObject.Properties['CimClass'] -and $a.CimClass) { $a.CimClass.CimClassName } else { $null }
+
             [pscustomobject]@{
-                Execute          = $a.Execute
-                Arguments        = $a.Arguments
-                WorkingDirectory = $a.WorkingDirectory
+                ActionType       = $actionType
+                Execute          = Get-CimPropertyValue -InputObject $a -Name 'Execute'
+                Arguments        = Get-CimPropertyValue -InputObject $a -Name 'Arguments'
+                WorkingDirectory = Get-CimPropertyValue -InputObject $a -Name 'WorkingDirectory'
+                ComClassId       = Get-CimPropertyValue -InputObject $a -Name 'ClassId'
+                ComData          = Get-CimPropertyValue -InputObject $a -Name 'Data'
             }
         }
 
