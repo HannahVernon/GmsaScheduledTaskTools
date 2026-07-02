@@ -88,10 +88,15 @@ begin
 
     function Format-Guid
     {
-        # Normalize a GUID to brace-wrapped upper form, e.g. {ABC...}.
+        # Extract the canonical GUID (8-4-4-4-12 hex) and return it brace-wrapped and upper.
+        # Using a regex match discards any stray surrounding or embedded characters - e.g. a
+        # zero-width space or other ignorable character that some TaskCache "Id" values carry -
+        # which a Trim-based approach leaves in place and which then breaks ordinal string
+        # comparison (the registry and culture-aware comparisons ignore such characters).
         param ([string] $Value)
-        $g = "$Value".Trim().Trim('{', '}').Trim()
-        return ('{' + $g.ToUpperInvariant() + '}')
+        $m = [regex]::Match("$Value", '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')
+        if ($m.Success) { return ('{' + $m.Value.ToUpperInvariant() + '}') }
+        return ("$Value".Trim())
     }
 }
 
