@@ -307,6 +307,19 @@ begin
         if (-not $rel.StartsWith('\')) { $rel = '\' + $rel }
         return $rel
     }
+
+    function ConvertTo-CanonicalGuid
+    {
+        # Extract the canonical GUID (8-4-4-4-12 hex) and return it brace-wrapped and upper.
+        # A regex match discards any stray surrounding or embedded characters - e.g. a
+        # zero-width space or other ignorable character that some TaskCache "Id" values carry.
+        # The registry and culture-aware comparisons ignore such characters, but ordinal string
+        # comparison does not, which otherwise produces false OrphanTreeEntry findings.
+        param ([string] $Value)
+        $m = [regex]::Match("$Value", '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')
+        if ($m.Success) { return ('{' + $m.Value.ToUpperInvariant() + '}') }
+        return ("$Value".Trim())
+    }
 }
 
 process
@@ -362,7 +375,7 @@ process
         if (-not $id) { continue }   # this is a folder node, not a task
 
         $relPath = Get-RelativeTreePath -FullKeyName $key.Name -TreeRootKeyName $treeRootName
-        $guid    = "$id".Trim()
+        $guid    = ConvertTo-CanonicalGuid $id
         [void]$treePaths.Add($relPath)
         $treeByGuid[$guid] = $relPath
         $treeTasks.Add([pscustomobject]@{ Guid = $guid; Path = $relPath })
@@ -374,7 +387,8 @@ process
     {
         foreach ($tk in (Get-ChildItem -LiteralPath $tasksRegPath -ErrorAction SilentlyContinue))
         {
-            $guid = $tk.PSChildName
+            $realName = $tk.PSChildName
+            $guid     = ConvertTo-CanonicalGuid $realName
             [void]$tasksGuids.Add($guid)
 
             if (-not $treeByGuid.ContainsKey($guid))
@@ -388,9 +402,9 @@ process
                 catch { }
 
                 New-Finding -Severity 'Error' -Category 'OrphanTaskEntry' `
-                    -TaskPath $regPathVal -TaskGuid $guid `
-                    -Detail "TaskCache\Tasks\$guid has no matching Tree entry$(if ($regPathVal) { " (registry Path = '$regPathVal')" })." `
-                    -SuggestedAction "Back up and delete the registry subkey '$tasksRegPath\$guid' (and any leftover XML), then reboot."
+                    -TaskPath $regPathVal -TaskGuid $realName `
+                    -Detail "TaskCache\Tasks\$realName has no matching Tree entry$(if ($regPathVal) { " (registry Path = '$regPathVal')" })." `
+                    -SuggestedAction "Back up and delete the registry subkey '$tasksRegPath\$realName' (and any leftover XML), then reboot."
             }
         }
     }
