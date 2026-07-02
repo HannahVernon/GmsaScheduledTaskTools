@@ -38,6 +38,13 @@
     SuggestedAction on each finding as guidance, and always back up the registry key and XML
     file before removing a damaged task.
 
+    The first object emitted is a Summary record (Category = Summary) that reports the count of
+    Tree task nodes, TaskCache\Tasks GUID keys, and on-disk XML files, plus a per-category
+    finding tally.  When TaskCache\Tasks holds far fewer entries than the Tree references, a
+    warning is raised: a large batch of OrphanTreeEntry findings is either severe TaskCache
+    damage or an incomplete enumeration, so verify with Get-TaskCacheSummary.ps1 before
+    repairing.
+
 .PARAMETER TasksPath
     Path to the on-disk task folder.  Defaults to "$env:SystemRoot\System32\Tasks".
 
@@ -607,7 +614,46 @@ process
         }
     }
 
-    # --- 7. Emit findings ---------------------------------------------------------------
+    # --- 7. Summary + emit findings -----------------------------------------------------
+    $treeNodeCount  = $treeTasks.Count
+    $tasksGuidCount = $tasksGuids.Count
+    $fileCount      = $diskRelPaths.Count
+
+    $catCounts = $script:findings | Group-Object Category | Sort-Object Name
+    $catText   = ($catCounts | ForEach-Object { "$($_.Name)=$($_.Count)" }) -join ', '
+    if (-not $catText) { $catText = 'none' }
+
+    $detail = ("Tree task nodes={0}; TaskCache\Tasks GUID keys={1}; XML files on disk={2}. Findings by category: {3}." -f `
+                $treeNodeCount, $tasksGuidCount, $fileCount, $catText)
+
+    # Heuristic: if Tasks holds far fewer GUID keys than the Tree references, the many
+    # OrphanTreeEntry findings are either severe TaskCache damage or an enumeration problem.
+    # Either way, verify before mass-repairing.
+    $assessment = ''
+    $orphanTree = ($script:findings | Where-Object Category -eq 'OrphanTreeEntry' | Measure-Object).Count
+    if ($treeNodeCount -gt 0 -and $tasksGuidCount -lt ($treeNodeCount * 0.5) -and $orphanTree -gt 10)
+    {
+        $assessment = ("TaskCache\Tasks has far fewer entries ($tasksGuidCount) than Tree references ($treeNodeCount), " +
+                       "producing $orphanTree OrphanTreeEntry findings. Before repairing, confirm whether those Tasks GUID " +
+                       "keys are genuinely missing (run Get-TaskCacheSummary.ps1 / spot-check Test-Path on a few). If they " +
+                       "actually exist, do NOT repair. If they are truly missing, prefer System Restore or " +
+                       "DISM /Online /Cleanup-Image /RestoreHealth over mass deletion of Tree entries.")
+        Write-Warning $assessment
+    }
+
+    $summary = [pscustomobject]@{
+        Severity        = 'Info'
+        Category        = 'Summary'
+        TaskPath        = $null
+        TaskGuid        = $null
+        FilePath        = $null
+        Detail          = $detail
+        SuggestedAction = $assessment
+        Repaired        = $null
+        RepairDetail    = $null
+    }
+
+    $summary
     foreach ($f in $script:findings)
     {
         $f
