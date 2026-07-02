@@ -20,6 +20,8 @@ Script | Purpose
 `New-GmsaScheduledTask.ps1` | Create (or idempotently update) a Scheduled Task that runs as a gMSA.  Optionally validates the gMSA on the host and grants the "Log on as a batch job" right.
 `Get-GmsaScheduledTask.ps1` | Report the principal, action, and trigger of one or more tasks, with a focus on gMSA detail.  Read-only.
 `Remove-GmsaScheduledTask.ps1` | Unregister a task and, optionally, revoke the gMSA's "Log on as a batch job" right.
+`Test-ScheduledTaskHealth.ps1` | Diagnose a stalled/hung Task Scheduler by reconciling the on-disk task XML files against the `TaskCache` registry, without calling the Task Scheduler service.  Emits a summary of counts and can `-Repair` (with backup).  Read-only by default.
+`Get-TaskCacheSummary.ps1` | Quick read-only count comparison of the `TaskCache` Tree, `TaskCache` Tasks, and on-disk XML sources, with optional per-GUID spot-checks.  Use to tell real corruption from a false alarm before repairing.
 
 Every script ships with comment-based help.  Run `Get-Help .\New-GmsaScheduledTask.ps1 -Full`
 for full parameter documentation and examples.
@@ -57,6 +59,47 @@ Remove a task (leaving the batch logon right in place for other workloads):
 ```powershell
 .\Remove-GmsaScheduledTask.ps1 -TaskName 'NightlyExport'
 ```
+
+Diagnose a Task Scheduler that hangs while enumerating tasks (the MMC, `schtasks`, and
+`Get-ScheduledTask` all stall when the service is stuck on one damaged task).  Run elevated:
+
+```powershell
+.\Test-ScheduledTaskHealth.ps1 |
+    Where-Object Severity -eq 'Error' |
+    Select-Object Category, TaskPath, TaskGuid, FilePath, SuggestedAction | Format-List
+```
+
+`Test-ScheduledTaskHealth.ps1` is read-only by default and does not call the Task Scheduler
+service, so it works even while `taskschd.msc` is unresponsive.  It flags orphaned `TaskCache`
+registry entries, missing or zero-byte or malformed task XML, and (with `-ResolvePrincipals`)
+unresolvable principal SIDs.
+
+To repair the damaged/orphaned tasks it finds, add `-Repair`.  Repair backs up each item (a
+native `.reg` export of the registry key plus a copy of the XML file, to `-BackupPath`) before
+removing it, and honors `-WhatIf` / `-Confirm`.  Always do a read-only run first, then reboot
+after a repair so the service re-reads `TaskCache`:
+
+```powershell
+# Preview what a repair would back up and remove (no changes):
+.\Test-ScheduledTaskHealth.ps1 -Repair -WhatIf
+
+# Back up and remove every damaged/orphaned task, then reboot:
+.\Test-ScheduledTaskHealth.ps1 -Repair -Confirm:$false
+```
+
+If a run reports a large number of `OrphanTreeEntry` findings, confirm the damage is real
+before repairing.  `Get-TaskCacheSummary.ps1` compares the counts of `TaskCache\Tree` nodes,
+`TaskCache\Tasks` GUID keys, and on-disk XML files, and can spot-check specific GUIDs:
+
+```powershell
+.\Get-TaskCacheSummary.ps1
+.\Get-TaskCacheSummary.ps1 -CheckGuid '{31C5D67F-4872-4930-9927-901B20E3A4D3}' | Format-List
+```
+
+If `TasksGuidKeys` is close to `TreeTaskNodes` and the spot-checks return `TasksKeyExists =
+True`, the orphan findings are false and you should not repair.  If `TasksGuidKeys` is far
+smaller and the keys are genuinely absent, prefer System Restore or `DISM /Online
+/Cleanup-Image /RestoreHealth` and `sfc /scannow` over mass deletion.
 
 ## Notes
 
